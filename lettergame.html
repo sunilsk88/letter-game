@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Letter and Number Key Game</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #dbeafe, #fef9c3);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .app {
+      width: min(900px, 100%);
+      text-align: center;
+    }
+
+    .topbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+      margin-bottom: 18px;
+    }
+
+    .stat, .control-group {
+      background: white;
+      border-radius: 16px;
+      padding: 12px 16px;
+      font-size: 18px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    }
+
+    .letter-wrap {
+      border-radius: 28px;
+      padding: 40px 20px;
+      background: white;
+      transition: all 0.15s ease;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+    }
+
+    .letter-wrap.correct {
+      background: #dcfce7;
+      transform: scale(1.03);
+    }
+
+    .letter-wrap.wrong {
+      background: #fee2e2;
+    }
+
+    .label {
+      font-size: 18px;
+      color: #555;
+      margin-bottom: 10px;
+    }
+
+    .letter {
+      font-size: clamp(140px, 30vw, 260px);
+      font-weight: bold;
+      user-select: none;
+    }
+
+    .subinfo {
+      margin-top: 14px;
+      font-size: 20px;
+      color: #444;
+    }
+
+    .buttons {
+      margin-top: 18px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+    }
+
+    button, select {
+      border: none;
+      border-radius: 14px;
+      padding: 12px 16px;
+      font-size: 16px;
+    }
+
+    button {
+      cursor: pointer;
+      background: #2563eb;
+      color: white;
+    }
+
+    button.alt {
+      background: #facc15;
+      color: black;
+    }
+
+    .hint {
+      margin-top: 18px;
+      font-size: 18px;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="topbar">
+      <div class="stat">⏱ Time: <span id="time">0</span>s</div>
+      <div class="stat">⭐ Score: <span id="score">0</span></div>
+      <div class="stat">Mode: <span id="modeLabel">A to Z</span></div>
+      <div class="control-group">
+        <select id="modeSelect">
+          <option value="alphabet">A to Z</option>
+          <option value="random">Random Letters</option>
+          <option value="numbers">1 to 20</option>
+          <option value="qwerty">QWERTY</option>
+        </select>
+        <select id="voiceRate">
+          <option value="0.65">Very slow</option>
+          <option value="0.8" selected>Slow</option>
+          <option value="1">Normal</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="letterWrap" class="letter-wrap">
+      <div class="label">Type this</div>
+      <div id="letter" class="letter">A</div>
+      <div class="subinfo">Last key: <span id="lastKey">—</span></div>
+      <div id="typedBuffer" class="subinfo">Typed so far: <span id="typedSoFar">—</span></div>
+    </div>
+
+    <div class="buttons">
+      <button onclick="resetGame()">Reset</button>
+      <button class="alt" onclick="toggleVoice()"><span id="voiceButtonText">Voice On</span></button>
+      <button class="alt" onclick="toggleWrongSound()"><span id="wrongSoundText">Wrong Sound Off</span></button>
+    </div>
+
+    <div class="hint">Press the matching key. Colors change every round, and numbers like 10 use multiple key presses.</div>
+  </div>
+
+  <script>
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const qwerty = 'QWERTYUIOPASDFGHJKLZXCVBNM'.split('');
+    const numbers = Array.from({ length: 20 }, (_, i) => String(i + 1));
+    const displayColors = [
+      '#1d4ed8',
+      '#b91c1c',
+      '#047857',
+      '#7c3aed',
+      '#c2410c',
+      '#be185d',
+      '#0f766e',
+      '#4338ca',
+      '#166534',
+      '#9f1239'
+    ];
+
+    let current = 'A';
+    let score = 0;
+    let time = 0;
+    let voiceOn = true;
+    let wrongSoundOn = false;
+    let mode = 'alphabet';
+    let index = 0;
+    let typedInput = '';
+    let currentColor = displayColors[0];
+
+    const letterEl = document.getElementById('letter');
+    const timeEl = document.getElementById('time');
+    const scoreEl = document.getElementById('score');
+    const lastKeyEl = document.getElementById('lastKey');
+    const typedSoFarEl = document.getElementById('typedSoFar');
+    const wrapEl = document.getElementById('letterWrap');
+    const modeLabelEl = document.getElementById('modeLabel');
+    const modeSelectEl = document.getElementById('modeSelect');
+    const voiceRateEl = document.getElementById('voiceRate');
+    const voiceButtonTextEl = document.getElementById('voiceButtonText');
+    const wrongSoundTextEl = document.getElementById('wrongSoundText');
+
+    function randomFromArray(arr, exclude = '') {
+      let next = exclude;
+      while (arr.length > 1 && next === exclude) {
+        next = arr[Math.floor(Math.random() * arr.length)];
+      }
+      return next || arr[0];
+    }
+
+    function applyRandomColor() {
+      currentColor = randomFromArray(displayColors, currentColor);
+      letterEl.style.color = currentColor;
+    }
+
+    function updateDisplay() {
+      letterEl.textContent = current;
+      typedSoFarEl.textContent = typedInput || '—';
+      applyRandomColor();
+    }
+
+    function speakItem(item) {
+      if (!voiceOn || !('speechSynthesis' in window)) return;
+      const utter = new SpeechSynthesisUtterance(item.toLowerCase());
+      utter.rate = Number(voiceRateEl.value);
+      speechSynthesis.cancel();
+      speechSynthesis.speak(utter);
+    }
+
+    function nextItem() {
+      let pool;
+      if (mode === 'numbers') pool = numbers;
+      else if (mode === 'qwerty') pool = qwerty;
+      else pool = letters;
+
+      if (mode === 'alphabet' || mode === 'numbers' || mode === 'qwerty') {
+        index = (index + 1) % pool.length;
+        current = pool[index];
+      } else {
+        current = randomFromArray(pool, current);
+      }
+
+      typedInput = '';
+      updateDisplay();
+    }
+
+    function setMode(newMode) {
+      mode = newMode;
+      index = 0;
+      typedInput = '';
+
+      if (mode === 'alphabet') {
+        current = letters[0];
+        modeLabelEl.textContent = 'A to Z';
+      } else if (mode === 'numbers') {
+        current = numbers[0];
+        modeLabelEl.textContent = '1 to 20';
+      } else if (mode === 'qwerty') {
+        current = qwerty[0];
+        modeLabelEl.textContent = 'QWERTY';
+      } else {
+        current = randomFromArray(letters);
+        modeLabelEl.textContent = 'Random Letters';
+      }
+
+      updateDisplay();
+    }
+
+    function resetGame() {
+      score = 0;
+      time = 0;
+      typedInput = '';
+      scoreEl.textContent = score;
+      timeEl.textContent = time;
+      lastKeyEl.textContent = '—';
+      setMode(mode);
+    }
+
+    function toggleVoice() {
+      voiceOn = !voiceOn;
+      voiceButtonTextEl.textContent = voiceOn ? 'Voice On' : 'Voice Off';
+      if (!voiceOn && 'speechSynthesis' in window) speechSynthesis.cancel();
+    }
+
+    function toggleWrongSound() {
+      wrongSoundOn = !wrongSoundOn;
+      wrongSoundTextEl.textContent = wrongSoundOn ? 'Wrong Sound On' : 'Wrong Sound Off';
+    }
+
+    function playWrongSound() {
+      if (!wrongSoundOn) return;
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 200;
+      gain.gain.value = 0.04;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.1);
+    }
+
+    function flashState(state) {
+      wrapEl.classList.add(state);
+      setTimeout(() => wrapEl.classList.remove(state), 150);
+    }
+
+    modeSelectEl.addEventListener('change', (e) => setMode(e.target.value));
+
+    document.addEventListener('keydown', (e) => {
+      const rawKey = e.key;
+      const key = rawKey.toUpperCase();
+
+      if (mode === 'numbers') {
+        if (!/^[0-9]$/.test(rawKey)) return;
+
+        lastKeyEl.textContent = rawKey;
+        const nextTyped = typedInput + rawKey;
+        typedInput = nextTyped;
+        typedSoFarEl.textContent = typedInput;
+
+        if (current.startsWith(nextTyped)) {
+          if (nextTyped === current) {
+            score += 1;
+            scoreEl.textContent = score;
+            flashState('correct');
+            speakItem(current);
+            setTimeout(nextItem, 80);
+          }
+        } else {
+          flashState('wrong');
+          playWrongSound();
+          typedInput = '';
+          typedSoFarEl.textContent = '—';
+        }
+
+        return;
+      }
+
+      if (!/^[A-Z]$/.test(key)) return;
+
+      lastKeyEl.textContent = key;
+      typedInput = key;
+      typedSoFarEl.textContent = typedInput;
+
+      if (key === current) {
+        score += 1;
+        scoreEl.textContent = score;
+        flashState('correct');
+        speakItem(key);
+        setTimeout(nextItem, 80);
+      } else {
+        flashState('wrong');
+        playWrongSound();
+        typedInput = '';
+        typedSoFarEl.textContent = '—';
+      }
+    });
+
+    setInterval(() => {
+      time += 1;
+      timeEl.textContent = time;
+    }, 1000);
+
+    setMode('alphabet');
+  </script>
+</body>
+</html>
