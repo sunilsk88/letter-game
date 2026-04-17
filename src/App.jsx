@@ -238,11 +238,14 @@ export default function App() {
   const [voiceRate, setVoiceRate] = useState('0.8')
   const [lastKey, setLastKey] = useState('—')
   const [typedInput, setTypedInput] = useState('')
-  const [flash, setFlash] = useState(null) // 'correct' | 'wrong' | null
+  const [flash, setFlash] = useState(null)
   const [color, setColor] = useState(COLORS[0])
   const [word, setWord] = useState(() => pickWord('A').text)
   const [emoji, setEmoji] = useState(() => pickWord('A').emoji)
   const wordRef = useRef(pickWord('A').text)
+  const [winW, setWinW] = useState(() => window.innerWidth)
+  const hiddenInputRef = useRef(null)
+  const isMobile = winW < 640
 
   const colorRef = useRef(COLORS[0])
   const modeRef = useRef(mode)
@@ -252,6 +255,12 @@ export default function App() {
   const voiceOnRef = useRef(voiceOn)
   const voiceRateRef = useRef(voiceRate)
   const wrongSoundOnRef = useRef(wrongSoundOn)
+  useEffect(() => {
+    const fn = () => setWinW(window.innerWidth)
+    window.addEventListener('resize', fn)
+    return () => window.removeEventListener('resize', fn)
+  }, [])
+
   useEffect(() => { modeRef.current = mode }, [mode])
   useEffect(() => { currentRef.current = current }, [current])
   useEffect(() => { indexRef.current = index }, [index])
@@ -281,11 +290,19 @@ export default function App() {
     if (word) {
       const sayWord = new SpeechSynthesisUtterance(word.toLowerCase())
       sayWord.rate = Number(voiceRateRef.current)
-      sayWord.onend = () => onDone?.()
+      let fired = false
+      const done = () => { if (!fired) { fired = true; onDone?.() } }
+      sayWord.onend = done
+      sayWord.onerror = done
+      setTimeout(done, 4000)
       speechSynthesis.speak(sayLetter)
       speechSynthesis.speak(sayWord)
     } else {
-      sayLetter.onend = () => onDone?.()
+      let fired = false
+      const done = () => { if (!fired) { fired = true; onDone?.() } }
+      sayLetter.onend = done
+      sayLetter.onerror = done
+      setTimeout(done, 3000)
       speechSynthesis.speak(sayLetter)
     }
   }, [])
@@ -322,60 +339,50 @@ export default function App() {
     const { text: wt, emoji: we } = pickWord(nextCurrent); wordRef.current = wt; setWord(wt); setEmoji(we)
     setTypedInput('')
     nextColor()
-    speak(nextCurrent, w)
   }, [nextColor, speak])
 
 
-  // Speak on first appearance
+  // Keep mobile keyboard visible
   useEffect(() => {
-    const t = setTimeout(() => speak(current, word), 400)
-    return () => clearTimeout(t)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    hiddenInputRef.current?.focus()
   }, [])
 
-  // Keydown handler
-  useEffect(() => {
-    const onKey = (e) => {
-      const rawKey = e.key
-      const key = rawKey.toUpperCase()
-      const m = modeRef.current
-      const cur = currentRef.current
 
-      if (m === 'numbers') {
-        if (!/^[0-9]$/.test(rawKey)) return
-        setLastKey(rawKey)
-        const nextTyped = typedInputRef.current + rawKey
-        setTypedInput(nextTyped)
+  const handleKeyPress = useCallback((rawKey) => {
+    const key = rawKey.toUpperCase()
+    const m = modeRef.current
+    const cur = currentRef.current
 
-        if (cur.startsWith(nextTyped)) {
-          if (nextTyped === cur) {
-            triggerFlash('correct')
-            speak(cur, wordRef.current, () => advance())
-          }
-        } else {
-          triggerFlash('wrong')
-          playWrongSound()
-          setTypedInput('')
+    if (m === 'numbers') {
+      if (!/^[0-9]$/.test(rawKey)) return
+      setLastKey(rawKey)
+      const nextTyped = typedInputRef.current + rawKey
+      setTypedInput(nextTyped)
+      if (cur.startsWith(nextTyped)) {
+        if (nextTyped === cur) {
+          triggerFlash('correct')
+          speak(cur, wordRef.current, () => advance())
         }
-        return
-      }
-
-      if (!/^[A-Z]$/.test(key)) return
-      setLastKey(key)
-      setTypedInput(key)
-
-      if (key === cur) {
-        triggerFlash('correct')
-        speak(key, wordRef.current, () => advance())
       } else {
         triggerFlash('wrong')
         playWrongSound()
         setTypedInput('')
       }
+      return
     }
 
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    if (!/^[A-Z]$/.test(key)) return
+    setLastKey(key)
+    setTypedInput(key)
+
+    if (key === cur) {
+      triggerFlash('correct')
+      speak(key, wordRef.current, () => advance())
+    } else {
+      triggerFlash('wrong')
+      playWrongSound()
+      setTypedInput('')
+    }
   }, [advance, speak, playWrongSound, triggerFlash])
 
   const handleModeChange = (newMode) => {
@@ -399,17 +406,38 @@ export default function App() {
     setCurrent(init)
     const { text: wt3, emoji: we3 } = pickWord(init); wordRef.current = wt3; setWord(wt3); setEmoji(we3)
     nextColor()
-    speak(init, w)
   }
 
   const wrapClass = flash ? `letter-wrap ${flash}` : 'letter-wrap'
 
   return (
-    <div style={styles.page}>
-      <div style={styles.app}>
+    <div style={{ ...styles.page, ...(isMobile ? { alignItems: 'flex-start', padding: '16px 12px' } : {}) }} onClick={() => hiddenInputRef.current?.focus()}>
+      {/* Hidden input keeps mobile keyboard open and captures input */}
+      <input
+        ref={hiddenInputRef}
+        onBlur={() => setTimeout(() => hiddenInputRef.current?.focus(), 100)}
+        onKeyDown={(e) => {
+          handleKeyPress(e.key)
+          e.preventDefault()
+        }}
+        onInput={(e) => {
+          // Fallback for Android where onKeyDown fires with key='Unidentified'
+          const val = e.currentTarget.value
+          if (val) handleKeyPress(val[val.length - 1])
+          e.currentTarget.value = ''
+        }}
+        style={{ position: 'fixed', top: '-200px', left: 0, width: '1px', height: '1px', opacity: 0, fontSize: '16px' }}
+        type="text"
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="characters"
+        readOnly={false}
+      />
+
+      <div style={{ ...styles.app, ...(isMobile ? { gap: '12px' } : {}) }}>
 
         {/* Header */}
-        <div style={styles.header}>
+        <div style={{ ...styles.header, ...(isMobile ? { padding: '0 8px' } : {}) }}>
           <div style={styles.headerLeft}>
             <span style={styles.appTitle}>LetterGame</span>
           </div>
@@ -437,25 +465,26 @@ export default function App() {
         </div>
 
         {/* Card + peeking characters wrapper */}
-        <div style={styles.cardWrapper}>
+        <div style={{ ...styles.cardWrapper, ...(isMobile ? { marginBottom: '20px' } : {}) }}>
 
-          {/* Peeking characters — z-index above card so faces show at edges */}
-          <div style={{ ...styles.peekSide, ...styles.peekLeft }}>🦕</div>
-          <div style={{ ...styles.peekSide, ...styles.peekRight }}>🦖</div>
-          <div style={styles.peekBottomLeft}><ChasePeeking /></div>
-          <div style={styles.peekBottomRight}><BumblebeePeeking /></div>
+          {/* Side peekers — hidden on mobile (overflow) */}
+          {!isMobile && <div style={{ ...styles.peekSide, ...styles.peekLeft }}>🦕</div>}
+          {!isMobile && <div style={{ ...styles.peekSide, ...styles.peekRight }}>🦖</div>}
+          {!isMobile && <div style={styles.peekBottomLeft}><ChasePeeking /></div>}
+          {!isMobile && <div style={styles.peekBottomRight}><BumblebeePeeking /></div>}
 
           {/* Main card */}
           <div style={{
             ...styles.card,
+            ...(isMobile ? { padding: '28px 16px 20px' } : {}),
             ...(flash === 'correct' ? styles.cardCorrect : {}),
             ...(flash === 'wrong' ? styles.cardWrong : {}),
           }}>
-            <p style={styles.prompt}>Press the matching key</p>
+            <p style={styles.prompt}>{isMobile ? 'Type the matching letter' : 'Press the matching key'}</p>
 
-            <div style={styles.letterRow}>
+            <div style={{ ...styles.letterRow, ...(isMobile ? { gap: '16px', minHeight: '160px' } : {}) }}>
               <div style={{ ...styles.letter, color }}>{current}</div>
-              {word && <div style={styles.divider} />}
+              {word && <div style={{ ...styles.divider, ...(isMobile ? { height: '100px' } : {}) }} />}
               {word && (
                 <div style={styles.wordBlock}>
                   <div style={styles.emojiDisplay}>{emoji}</div>
@@ -473,7 +502,7 @@ export default function App() {
         </div>
 
         {/* Controls */}
-        <div style={styles.controls}>
+        <div style={{ ...styles.controls, ...(isMobile ? { gap: '8px' } : {}) }}>
           <button onClick={handleReset} style={styles.btnGhost}>↺ Reset</button>
           <button
             onClick={() => { setVoiceOn(v => { if (v && 'speechSynthesis' in window) speechSynthesis.cancel(); return !v }) }}
@@ -496,13 +525,15 @@ export default function App() {
 
 const styles = {
   page: {
-    minHeight: '100vh',
+    minHeight: '100dvh',
     background: 'linear-gradient(160deg, #e0f2fe 0%, #fef9c3 50%, #fce7f3 100%)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     padding: '24px 16px',
     fontFamily: "'Nunito', sans-serif",
+    boxSizing: 'border-box',
+    overflowY: 'auto',
   },
   app: {
     width: '100%',
